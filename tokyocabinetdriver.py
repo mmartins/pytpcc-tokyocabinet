@@ -34,6 +34,7 @@ import logging
 import os
 import pyrant
 import sys
+import types
 
 try:
 	import psyco
@@ -305,6 +306,10 @@ class TokyocabinetDriver(AbstractDriver):
 			assert key in config, "Missing parameter '%s' in %s configuration" % (key, self.name)
 
 		if config["servers"]:
+			# If reading from INI file, we need to convert Python description in
+			# string to real object
+			if type(config["servers"]) == types.StringType:
+					config["servers"] = eval(config["servers"])
 			for serverId, tables in config["servers"].iteritems():
 				self.databases[serverId] = tables
 
@@ -314,14 +319,16 @@ class TokyocabinetDriver(AbstractDriver):
 			for tab, values in tables.iteritems():
 				conn[serverId][tab] = pyrant.Tyrant(values["host"], values["port"])
 			self.conn[serverId] = conn
-
 		## FOR
 
 		if config["reset"]:
 			for serverId, tables in self.conn.iteritems():
 				for tab in tables.keys():
 					logging.debug("Deleting database '%s'" % tab)
-					self.conn[serverId][tab].vanish()
+					self.conn[serverId][tab].clear()
+				## FOR
+			## FOR
+		## IF
 
 	## -------------------------------------------
 	## loadTuples
@@ -335,7 +342,6 @@ class TokyocabinetDriver(AbstractDriver):
 
 		## TODO:
 		## 1. Use denormalized tables?
-		## 2. Create indexes
 		if len(tuples) == 0: return
 
 		logging.debug("Loading %d tuples of tableName %s" % (len(tuples), tableName))
@@ -497,6 +503,32 @@ class TokyocabinetDriver(AbstractDriver):
 	## loadFinish
 	## -------------------------------------------
 	def loadFinish(self):
+
+
+		# Add indexes to database after loading all data
+		for serverId, tables in self.databases.iteritems():
+			conn = self.conn.get(serverId, dict())
+			for tab, connValues in tables.iteritems():
+				conn[serverId][tab] = pyrant.TyrantProtocol(connValues["host"], connValues["port"])
+				for index_name in TABLE_COLUMNS[tab]:
+					conn[serverId][tab].add_index(index_name)
+			## FOR
+		## FOR
+
+		# Optimize indexes for faster access
+		for serverId, tables in self.databases.iteritems():
+			for tab, connValues in tables.iteritems():
+				for index_name in TABLE_COLUMNS[tab]:
+					conn[serverId][tab].optimize_index(index_name)
+			## FOR
+		## FOR
+
+		# Finally, flush everything to disk
+		for tab in TABLE_COLUMNS.keys():
+			for sID in self.conn.keys():
+				self.conn[sID][tab].sync()
+		## FOR
+				
 		logging.info("Finished loading tables")
 
 	## --------------------------------------------
@@ -955,7 +987,12 @@ class TokyocabinetDriver(AbstractDriver):
 
 		# Create the history record
 		# insertHistory
-		key = self.conn[sid][constants.TABLENAME_HISTORY].genuid()
+		try:
+			key = self.conn[sid][constants.TABLENAME_HISTORY].generate_key()
+		except ValueError, err:
+			sys.stderr.write("%s(%s): Can't generate unique primary key\n" % (ValueError, err))
+			return
+
 		cols = {"H_C_ID": c_id, "H_C_D_ID": c_d_id, "H_C_W_ID": c_w_id, "H_D_ID":
 						d_id, "H_W_ID": w_id, "H_DATE": h_date, "H_AMOUNT":
 						h_amount, "H_DATA": h_data}

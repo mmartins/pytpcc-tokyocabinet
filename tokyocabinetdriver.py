@@ -26,7 +26,7 @@
 
 from __future__ import with_statement
 from abstractdriver import *
-from pprint import pformat
+from pprint import pprint, pformat
 
 import commands
 import constants
@@ -42,24 +42,237 @@ except ImportError:
 else:
 	psyco.profile()
 
+TABLE_COLUMNS = {
+	constants.TABLENAME_ITEM: [
+		"I_ID", # INTEGER
+		"I_IM_ID", # INTEGER
+		"I_NAME", # VARCHAR
+		"I_PRICE", # FLOAT
+		"I_DATA", # VARCHAR
+	],
+	constants.TABLENAME_WAREHOUSE: [
+		"W_ID", # SMALLINT
+		"W_NAME", # VARCHAR
+		"W_STREET_1", # VARCHAR
+		"W_STREEET_2", # VARCHAR
+		"W_CITY", # VARCHAR
+		"W_STATE", # VARCHAR
+		"W_ZIP", # VARCHAR
+		"W_TAX", # FLOAT
+		"W_YTD", # FLOAT
+	],
+	constants.TABLENAME_DISTRICT: [
+		"D_ID", # TINYINT
+		"D_W_ID", # SMALLINT
+		"D_NAME", # VARCHAR
+		"D_STREET_1", # VARCHAR
+		"D_STREET_2", # VARCHAR
+		"D_CITY", # VARCHAR
+		"D_STATE", # VARCHAR
+		"D_ZIP", # VARCHAR
+		"D_YTD", # FLOAT
+		"D_NEXT_O_ID", # INT
+	],
+	constants.TABLENAME_CUSTOMER: [
+		"C_ID", # INTEGER
+		"C_D_ID", # TINYINT
+		"C_W_ID", # SMALLINT
+		"C_FIRST", # VARCHAR
+		"C_MIDDLE", # VARCHAR
+		"C_LAST", # VARCHAR
+		"C_STREET_1", # VARCHAR
+		"C_STREET_2", # VARCHAR
+		"C_CITY", # VARCHAR
+		"C_STATE", # VARCHAR
+		"C_ZIP", # VARCHAR
+		"C_PHONE", # VARCHAR
+		"C_SINCE", # TIMESTAMP
+		"C_CREDIT", # VARCHAR
+		"C_CREDIT_LIM", # FLOAT
+		"C_DISCOUNT", # FLOAT
+		"C_BALANCE", # FLOAT
+		"C_YTD_PAYMENT", # FLOAT
+		"C_PAYMENT_CNT", # INTEGER
+		"C_DELIVERY_CNT", # INTEGER
+		"C_DATA", # VARCHAR
+	],
+	constants.TABLENAME_STOCK: [
+		"S_I_ID", # INTEGER
+		"S_W_ID", # SMALLINT
+		"S_QUANTITY", # INTEGER
+		"S_DIST_01", # VARCHAR
+		"S_DIST_02", # VARCHAR
+		"S_DIST_03", # VARCHAR
+		"S_DIST_04", # VARCHAR
+		"S_DIST_05", # VARCHAR
+		"S_DIST_06", # VARCHAR
+		"S_DIST_07", # VARCHAR
+		"S_DIST_08", # VARCHAR
+		"S_DIST_09", # VARCHAR
+		"S_DIST_10", # VARCHAR
+		"S_YTD", # INTEGER
+		"S_ORDER_CNT", # INTEGER
+		"S_REMOTE_CNT", # INTEGER
+		"S_DATA", # VARCHAR
+	],
+	constants.TABLENAME_ORDERS: [
+		"O_ID", # INTEGER
+		"O_C_ID", # INTEGER
+		"O_D_ID", # TINYINT
+		"O_W_ID", # SMALLINT
+		"O_ENTRY_ID", # TIMESTAMP
+		"O_CARRIER_ID", # INTEGER
+		"O_OL_CNT", # INTEGER
+		"O_ALL_LOCAL", # INTEGER
+	],
+	constants.TABLENAME_NEW_ORDER: [
+		"NO_O_ID", # INTEGER
+		"NO_D_ID", # TINYINT
+		"NO_W_ID", # SMALLINT
+	],
+	constants.TABLENAME_ORDER_LINE: [
+		"OL_O_ID", # INTEGER
+		"OL_D_ID", # TINYINT
+		"OL_W_ID", # SMALLINT
+		"OL_NUMBER", # INTEGER
+		"OL_I_ID", # INTEGER
+		"OL_SUPPLY_W_ID", # SMALLINT
+		"OL_DELIVERY_D", # TIMESTAMP
+		"OL_QUANTITY", # INTEGER
+		"OL_AMOUNT", # FLOAT
+		"OL_DIST_INFO", # VARCHAR
+	],
+	constants.TABLENAME_HISTORY: [
+		"H_C_ID", # INTEGER
+		"H_C_D_ID", # TINYINT
+		"H_C_W_ID", # SMALLINT
+		"H_D_ID", # TINYINT
+		"H_W_ID", # SMALLINT
+		"H_DATA", # TIMESTAMP
+		"H_AMOUNT", # FLOAT
+		"H_DATA", # VARCHAR
+	],
+}
+TABLE_INDEXES = {
+	constants.TABLENAME_ITEM: [
+		"I_ID",
+	],
+	constants.TABLENAME_WAREHOUSE: [
+		"W_ID",
+	],
+	constants.TABLENAME_DISTRICT: [
+		"D_ID",
+		"D_W_ID",
+	],
+	constants.TABLENAME_CUSTOMER: [
+		"C_ID",
+		"C_D_ID",
+		"C_D_ID",
+		"C_W_ID",
+	],
+	constants.TABLENAME_STOCK: [
+		"S_I_ID",
+		"S_W_ID",
+	],
+	constants.TABLENAME_ORDERS: [
+		"O_ID",
+		"O_D_ID",
+		"O_W_ID",
+		"O_C_ID",
+	],
+	constants.TABLENAME_NEW_ORDER: [
+		"NO_O_ID",
+		"NO_D_ID",
+		"NO_W_ID",
+	],
+	constants.TABLENAME_ORDER_LINE: [
+		"OL_O_ID",
+		"OL_D_ID",
+		"OL_W_ID",
+	],
+}
+
+## ==============================================
+## TokyocabinetDriver
+## ==============================================
 class TokyocabinetDriver(AbstractDriver):
 
+	## In Tokyo Cabinet, we have one connection per *table*, not per database.
 	DEFAULT_CONFIG = {
-					"Server1":
-					{
-						"ORDER":
-						{
-							"host": "localhost",
-							"port": 1978,
-							"persistent": True
-						}
-					}
-				}
+		"servers": {
+			0: {
+				constants.TABLENAME_ITEM:
+				{
+					"host": "localhost",
+					"port": 1978,
+					"persistent": True,
+					"replicated": False,
+				},
+				constants.TABLENAME_WAREHOUSE:
+				{
+					"host": "localhost",
+					"port": 1979,
+					"persistent": True,
+					"replicated": False,
+				},
+				constants.TABLENAME_DISTRICT:
+				{
+					"host": "localhost",
+					"port": 1980,
+					"persistent": True,
+					"replicated": False,
+				},
+				constants.TABLENAME_CUSTOMER:
+				{
+					"host": "localhost",
+					"port": 1981,
+					"persistent": True,
+					"replicated": False,
+				},
+				constants.TABLENAME_STOCK:
+				{
+					"host": "localhost",
+					"port": 1982,
+					"persistent": True,
+					"replicated": False,
+				},
+				constants.TABLENAME_ORDERS:
+				{
+					"host": "localhost",
+					"port": 1983,
+					"persistent": True,
+					"replicated": False,
+				},
+				constants.TABLENAME_NEW_ORDER:
+				{
+					"host": "localhost",
+					"port": 1984,
+					"persistent": True,
+					"replicated": False,
+				},
+				constants.TABLENAME_ORDER_LINE:
+				{
+					"host": "localhost",
+					"port": 1985,
+					"persistent": True,
+					"replicated": False,
+				},
+				constants.TABLENAME_HISTORY:
+				{
+					"host": "localhost",
+					"port": 1986,
+					"persistent": True,
+					"replicated": False,
+				},
+			},
+		}
+	}
 
 	def __init__(self, ddl):
 		super(TokyocabinetDriver, self).__init__("tokyocabinet", ddl)
 		self.databases = dict()
 		self.conn = dict()
+		self.denormalize = False
 
 	##-----------------------------------------------
 	## tupleToString
@@ -75,8 +288,8 @@ class TokyocabinetDriver(AbstractDriver):
 	##-----------------------------------------------
 	def getServer(self, warehouseID):
 		"""Return server that contains partitioned data, according to warehouseID"""
-		sID = self.partition.get(warehouseID, -1)
-		return sID
+		## For now, serverID corresponds to wareHouseID
+		return warehouseID
 
 	## ----------------------------------------------
 	## makeDefaultConfig
@@ -85,14 +298,15 @@ class TokyocabinetDriver(AbstractDriver):
 		return TokyocabinetDriver.DEFAULT_CONFIG
 
 	## ----------------------------------------------
-	## loadDefaultConfig
+	## loadConfig
 	## ----------------------------------------------
-	def loadDefaultConfig(self, config):
+	def loadConfig(self, config):
 		for key in map(lambda x:x[0], TokyocabinetDriver.DEFAULT_CONFIG):
 			assert key in config, "Missing parameter '%s' in %s configuration" % (key, self.name)
 
-		for serverId, tables in config.iteritems():
-			self.databases[serverId] = tables
+		if config["servers"]:
+			for serverId, tables in config["servers"].iteritems():
+				self.databases[serverId] = tables
 
 		# First connect to databases
 		for serverId, tables in self.databases.iteritems():
@@ -121,9 +335,7 @@ class TokyocabinetDriver(AbstractDriver):
 
 		## TODO:
 		## 1. Use denormalized tables?
-		## 2. Remove redundant columns
-		## 3. Finish ITEM table filling
-		## 4. Create indexes
+		## 2. Create indexes
 		if len(tuples) == 0: return
 
 		logging.debug("Loading %d tuples of tableName %s" % (len(tuples), tableName))
@@ -305,10 +517,10 @@ class TokyocabinetDriver(AbstractDriver):
 		sID = getServer(w_id)
 
 		try:
-			newOrderQuery = self.conn[sID]["NEW_ORDER"].query
-			ordersQuery   = self.conn[sID]["ORDERS"].query
-			orderLineQuery = self.conn[sID]["ORDER_LINE"].query
-			customerQuery = self.conn[sID]["CUSTOMER"].query
+			newOrderQuery = self.conn[sID][constants.TABLENAME_NEW_ORDER].query
+			ordersQuery   = self.conn[sID][constants.TABLENAME_ORDERS].query
+			orderLineQuery = self.conn[sID][constants.TABLENAME_ORDER_LINE].query
+			customerQuery = self.conn[sID][constants.TABLENAME_CUSTOMER].query
 		except KeyError, err:
 			sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
 			sys.exit(1)
@@ -356,21 +568,21 @@ class TokyocabinetDriver(AbstractDriver):
 			for record in orders:
 				key, cols = record
 				cols["O_CARRIER_ID"] = o_carrier_id
-				self.conn[sID]["ORDERS"].put(key, orders)
+				self.conn[sID][constants.TABLENAME_ORDERS].put(key, orders)
 
 			# updateOrderLine
 			orders = orderLineQuery.filter(OL_O_ID = no_o_id, OL_D_ID = d_id, OL_W_ID = w_id)
 			for record in orders:
 				key, cols = record
 				cols["OL_DELIVERY_ID"] = ol_delivery_id
-				self.conn[sID]["ORDER_LINE"].put(key, ol_delivery_d)
+				self.conn[sID][constants.TABLENAME_ORDER_LINE].put(key, ol_delivery_d)
 
 			# updateCustomer
 			customers = customerQuery.filter(C_ID = c_id, C_D_ID = d_id, C_W_ID = w_id)
 			for record in customers:
 				key, cols = record
 				cols["C_BALANCE"] += ol_total
-				self.conn[sID]["CUSTOMER"].put(key, cols)
+				self.conn[sID][constants.TABLENAME_CUSTOMER].put(key, cols)
 		
 			result.append((d_id, no_o_id))
 		## FOR
@@ -404,13 +616,13 @@ class TokyocabinetDriver(AbstractDriver):
 		sID = getServer(w_id)
 
 		try:
-			warehouseQuery = self.conn[sID]["WAREHOUSE"].query
-			districtQuery  = self.conn[sID]["DISTRICT"].query
-			customerQuery  = self.conn[sID]["CUSTOMER"].query
-			orderQuery = self.conn[sID]["ORDERS"].query
-			newOrderQuery = self.conn[sID]["NEW_ORDER"].query
-			itemQuery = self.conn[sID]["ITEM"].query
-			stockQuery = self.conn[sID]["STOCK"].query
+			warehouseQuery = self.conn[sID][constants.TABLENAME_WAREHOUSE].query
+			districtQuery  = self.conn[sID][constants.TABLENAME_DISTRICT].query
+			customerQuery  = self.conn[sID][constants.TABLENAME_CUSTOMER].query
+			orderQuery = self.conn[sID][constants.TABLENAME_ORDERS].query
+			newOrderQuery = self.conn[sID][constants.TABLENAME_NEW_ORDER].query
+			itemQuery = self.conn[sID][constants.TABLENAME_ITEM].query
+			stockQuery = self.conn[sID][constants.TABLENAME_STOCK].query
 		except KeyError, err:
 			sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
 			sys.exit(1)
@@ -463,7 +675,7 @@ class TokyocabinetDriver(AbstractDriver):
 		for record in districts:
 			key, cols = record
 			cols["D_NEXT_O_ID"] = d_next_o_id + 1
-			self.conn[sID]["DISTRICT"].put(key, cols)
+			self.conn[sID][constants.TABLENAME_DISTRICT].put(key, cols)
 
 		# createOrder
 		key = tupleToString((d_next_o_id, d_id, w_id))
@@ -471,12 +683,12 @@ class TokyocabinetDriver(AbstractDriver):
 						c_id, "O_ENTRY_D": o_entry_d, "O_CARRIER_ID":
 						o_carrier_id, "O_OL_CNT": o_ol_cnt, "O_ALL_LOCAL":
 						all_local}
-		self.conn[sID]["ORDERS"].put(key, cols)
+		self.conn[sID][constants.TABLENAME_ORDERS].put(key, cols)
 
 		# createNewOrder
 		key = tupleToString((d_next_o_id, d_id, w_id))
 		cols = {"NO_O_ID": d_next_o_id, "NO_D_ID": d_id, "NO_W_ID": w_id}
-		self.conn[sID]["NEW_ORDER"].put(key, cols)
+		self.conn[sID][constants.TABLENAME_NEW_ORDER].put(key, cols)
 
 		## -------------------------------
 		## Insert Order Item Information
@@ -530,7 +742,7 @@ class TokyocabinetDriver(AbstractDriver):
 				cols["S_YTD"] = s_ytd
 				cols["S_ORDER_CNT"] =  s_order_cnt
 				cols["S_REMOTE_CNT"] = s_remote_cnt
-				self.conn[sID]["STOCK"].put(key, cols)
+				self.conn[sID][constants.TABLENAME_STOCK].put(key, cols)
 
 			if i_data.find(constants.ORIGINAL_STRING) != -1 and s_data.find(constants.ORIGINAL_STRING) != -1:
 				bran_generic = 'B'
@@ -548,7 +760,7 @@ class TokyocabinetDriver(AbstractDriver):
 							"OL_SUPPLY_W_ID": ol_supply_w_id, "OL_DELIVERY_D":
 							ol_entry_d, "OL_QUANTITY": ol_quantity, "OL_AMOUNT":
 							ol_amount, "OL_DIST_INFO": s_dist_xx}
-			self.conn[sID]["ORDER_LINE"].put(key, cols)
+			self.conn[sID][constants.TABLENAME_ORDER_LINE].put(key, cols)
 
 			## Add the info to be returned
 			item_data.append((i_name, s_quantity, brand_generic, i_price, ol_amount))
@@ -589,9 +801,9 @@ class TokyocabinetDriver(AbstractDriver):
 		sID = getServer(w_id)
 
 		try:
-			customerQuery = self.conn["CUSTOMER"]
-			orderQuery    = self.conn["ORDERS"]
-			orderLineQuery= self.conn["ORDER_LINE"]
+			customerQuery = self.conn[constants.TABLENAME_CUSTOMER]
+			orderQuery    = self.conn[constants.TABLENAME_ORDERS]
+			orderLineQuery= self.conn[constants.TABLENAME_ORDER_LINE]
 		except KeyError, err:
 			sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
 			sys.exit(1)
@@ -657,9 +869,9 @@ class TokyocabinetDriver(AbstractDriver):
 		sID = getServer(w_id)
 
 		try:
-			customerQuery  = self.conn["CUSTOMER"]
-			wareHouseQuery = self.conn["WAREHOUSE"]
-			districtQuery  = self.conn["DISTRICT"]
+			customerQuery  = self.conn[constants.TABLENAME_CUSTOMER]
+			wareHouseQuery = self.conn[constants.TABLENAME_WAREHOUSE]
+			districtQuery  = self.conn[constants.TABLENAME_DISTRICT]
 		except KeyError, err:
 			sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
 			sys.exit(1)
@@ -702,14 +914,14 @@ class TokyocabinetDriver(AbstractDriver):
 		for record in warehouses:
 			key, cols = record
 			cols["W_YTD"] += h_amount
-			self.conn[sID]["WAREHOUSE"].put(key, cols)
+			self.conn[sID][constants.TABLENAME_WAREHOUSE].put(key, cols)
 
 		# updateDistrictBalance
 		districts = districtQuery.filter(W_ID = w_id, D_ID = d_id)
 		for record in districts:
 			key, cols = record
 			cols["D_YTD"] += h_amount
-			self.conn[sID]["DISTRICT"].put(key, cols)
+			self.conn[sID][constants.TABLENAME_DISTRICT].put(key, cols)
 
 		# Customer Credit Information
 		customers = customerQuery.filter(C_W_ID = c_w_id, C_D_ID = c_d_id, C_ID = c_id)
@@ -726,7 +938,7 @@ class TokyocabinetDriver(AbstractDriver):
 				cols["C_YTD_PAYMENT"] = c_ytd_payment
 				cols["C_PAYMENT_CNT"] = c_payment_cnt
 				cols["C_DATA"] = c_data
-				self.conn[sID]["CUSTOMER"].put(key, cols)
+				self.conn[sID][constants.TABLENAME_CUSTOMER].put(key, cols)
 		else:
 			c_data = ""
 
@@ -736,18 +948,18 @@ class TokyocabinetDriver(AbstractDriver):
 				cols["C_BALANCE"] = c_balance
 				cols["C_YTD_PAYMENT"] = c_ytd_payment
 				cols["C_PAYMENT_CNT"] = c_payment_cnt
-				self.conn[sID]["CUSTOMER"].put(key, cols)
+				self.conn[sID][constants.TABLENAME_CUSTOMER].put(key, cols)
 
 		# Concatenate w_name, four space, d_name
 		h_data = "%s    %s" % (warehouseInfo["W_NAME"], districtInfo["D_NAME"])
 
 		# Create the history record
 		# insertHistory
-		key = self.conn[sid]["HISTORY"].genuid()
+		key = self.conn[sid][constants.TABLENAME_HISTORY].genuid()
 		cols = {"H_C_ID": c_id, "H_C_D_ID": c_d_id, "H_C_W_ID": c_w_id, "H_D_ID":
 						d_id, "H_W_ID": w_id, "H_DATE": h_date, "H_AMOUNT":
 						h_amount, "H_DATA": h_data}
-		self.conn[sID]["HISTORY"].put(key, cols)
+		self.conn[sID][constants.TABLENAME_HISTORY].put(key, cols)
 
 		## Commit!
 		# TODO Commit
@@ -777,9 +989,9 @@ class TokyocabinetDriver(AbstractDriver):
 		threshold = params["threshold"]
 
 		try:
-			districtQuery  = self.conn["DISTRICT"].query
-			orderLineQuery = self.conn["ORDER_LINE"].query
-			stockQuery     = self.conn["STOCK"].query
+			districtQuery  = self.conn[constants.TABLENAME_DISTRICT].query
+			orderLineQuery = self.conn[constants.TABLENAME_ORDER_LINE].query
+			stockQuery     = self.conn[constants.TABLENAME_STOCK].query
 		except KeyError, err:
 			sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
 			sys.exit(1)

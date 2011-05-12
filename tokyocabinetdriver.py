@@ -26,13 +26,13 @@
 
 from __future__ import with_statement
 from abstractdriver import *
-from pprint import pprint.pformat
+from pprint import pformat
 
 import commands
 import constants
 import logging
 import os
-import pytyrant
+import pyrant
 import sys
 
 try:
@@ -45,16 +45,16 @@ else:
 class TokyocabinetDriver(AbstractDriver):
 
 	DEFAULT_CONFIG = {
-		"Server1",
-		{
-			"ORDER",
-			{
-				"host": "localhost",
-				"port": 1978,
-				"persistent": True
-			}
-		}
-	}
+					"Server1":
+					{
+						"ORDER":
+						{
+							"host": "localhost",
+							"port": 1978,
+							"persistent": True
+						}
+					}
+				}
 
 	def __init__(self, ddl):
 		super(TokyocabinetDriver, self).__init__("tokyocabinet", ddl)
@@ -68,7 +68,7 @@ class TokyocabinetDriver(AbstractDriver):
 		"""Tokyo-Cabinet table-type databases only accept strings as keys.
 		   This function transforms a compound key (tuple) into a string.
 		   Tuples elements are separated by the sep char"""
-		   return sep.join(str(t) for t in tuple)
+		return sep.join(str(t) for t in tuple)
 
     ##-----------------------------------------------
 	## getServer
@@ -134,9 +134,8 @@ class TokyocabinetDriver(AbstractDriver):
 
 		## We want to combine all of a CUSTOMER's ORDERS, ORDER_LINE, and
 		## records into a single document
+		## (Taken from MongoDB. Is this really necessary?)
 		if self.denormalize and tableName in TokyocabinetDriver.DENORMALIZED_TABLES:
-			## TODO
-		else:
 			## If this is the CUSTOMER table, then we'll just store the record locally for now
 			if tableName == constants.TABLENAME_CUSTOMER:
 				for t in tuples:
@@ -150,7 +149,20 @@ class TokyocabinetDriver(AbstractDriver):
 				for t in tuples:
 					o_key = tupleToString(t[:3]) # O_ID, O_D_ID, O_W_ID
 					(c_key, o_idx) = self.w_order[o_key]
+					c = self.w_customers[c_key]
+					assert o_idx >= 0
+					assert o_idx < len(c[constants.TABLENAME_ORDERS])
+					o = c[constants.TABLENAME_ORDERS][o_idx]
+					if not tableName in o: o[tableName] = [ ]
+					o[tableName].append(dict(map(lambda i: (columns[i], t[i]),
+							num_columns[4:])))
+				## FOR
 
+			## Otherwise we have to find the CUSTOMER record for the other
+			## tables and append ourselves to them
+
+			## TODO: Finish this implementation
+		else:
 			if tableName == constants.TABLENAME_WAREHOUSE:
 				for t in tuples:
 					w_key = t[:1] # W_ID
@@ -168,21 +180,34 @@ class TokyocabinetDriver(AbstractDriver):
 					w_key = str(t[1:2]) # W_ID
 					d_key = tupleToString(t[:2]) # D_ID, D_W_ID
 					cols = dict(map(lambda i: (columns[i], t[i]), num_columns))
-					self.conn[w_key][tableName].put(d_key, cols)
+					try:
+						self.conn[w_key][tableName].put(d_key, cols)
 					except KeyError, err:
 						sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
 						sys.exit(1)
 				## FOR
 
+			## Item table doesn't have a w_id for partition. Replicate it to all
+			## servers
 			elif table == constants.TABLENAME_ITEM:
-					# TODO: Item table has no w_id. How to partition?
+				for t in tuples:
+					i_key = t[0]
+					cols = dict(map(lambda i: (columns[i], t[i]), num_columns))
+					for i in xrange(self.numServers):
+						try:
+							self.conn[i][tableName].put(i_key, cols)
+						except KeyError, err:
+							sys.stderr.out("%s(%s): server ID doesn't exist or is offline\n" %(KeyError, err))
+							sys.exit(1)
+					## FOR
+				## FOR
 
 			elif tableName == constants.TABLENAME_CUSTOMER:
 				for t in tuples:
 					try:
 						w_key = str(t[2:3]) # W_ID
 						c_key = tupleToString(t[:3]) # C_ID, C_D_ID, C_W_ID
-						cols = ditc(map(lambda i: (columns[i], t[i]), num_columns))
+						cols = dict(map(lambda i: (columns[i], t[i]), num_columns))
 						self.conn[w_key][tableName].put(c_key, cols)
 					except KeyError, err:
 						sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
@@ -259,7 +284,7 @@ class TokyocabinetDriver(AbstractDriver):
 	## -------------------------------------------
 	## loadFinish
 	## -------------------------------------------
-	def loadFinish(self)
+	def loadFinish(self):
 		logging.info("Finished loading tables")
 
 	## --------------------------------------------
@@ -293,7 +318,7 @@ class TokyocabinetDriver(AbstractDriver):
 		for d_id in xrange(1, constants.DISTRICTS_PER_WAREHOUSE+1):
 
 			# getNewOrder
-			newOrders = newOrderQuery.filter("NO_D_ID" = d_id, "NO_W_ID" = w_id, "NO_O_ID" = 1)
+			newOrders = newOrderQuery.filter(NO_D_ID = d_id, NO_W_ID = w_id, NO_O_ID = 1)
 			if len(newOrders) == 0:
 				## No orders for this district: skip it. Note: This must
 				## reported if > 1%
@@ -302,12 +327,12 @@ class TokyocabinetDriver(AbstractDriver):
 			no_o_id = newOrders.columns("NO_O_ID")[0]["NO_O_ID"]
 
 			# getCId
-			cids = orderQuery.filter("O_ID" = no_o_id, "O_D_ID" = d_id, "O_W_ID" = w_id, "O_C_ID" = 1)
+			cids = orderQuery.filter(O_ID = no_o_id, O_D_ID = d_id, O_W_ID = w_id, O_C_ID = 1)
 			assert len(c_ids) > 0
 			c_id = cids.columns("O_C_ID")[0]["O_C_ID"]
 
 			# sumOLAmount
-			olines = orderLineQuery.filter("OL_O_ID" = no_o_id, "OL_D_ID" = d_id, "OL_W_ID" = w_id)
+			olines = orderLineQuery.filter(OL_O_ID = no_o_id, OL_D_ID = d_id, OL_W_ID = w_id)
 
 			# These must be logged in the "result file" according to TPC-C 
 			# 2.7.22 (page 39)
@@ -322,11 +347,11 @@ class TokyocabinetDriver(AbstractDriver):
 			assert ol_total > 0.0
 
 			# deleteNewOrder
-			orders = newOrderQuery.filter("NO_D_ID" = d_id, "NO_W_ID" = w_id, "NO_O_ID" = no_o_id)
+			orders = newOrderQuery.filter(NO_D_ID = d_id, NO_W_ID = w_id, NO_O_ID = no_o_id)
 			orders.delete(quick=True)
 
 			# updateOrders
-			orders = orderQuery.filter("O_ID" = no_o_id, "O_D_ID" = d_id, "O_W_ID" = w_id)
+			orders = orderQuery.filter(O_ID = no_o_id, O_D_ID = d_id, O_W_ID = w_id)
 			## UPDATE ORDERS SET O_CARRIER_ID = ?...
 			for record in orders:
 				key, cols = record
@@ -334,14 +359,14 @@ class TokyocabinetDriver(AbstractDriver):
 				self.conn[sID]["ORDERS"].put(key, orders)
 
 			# updateOrderLine
-			orders = orderLineQuery.filter("OL_O_ID" = no_o_id, "OL_D_ID" = d_id, "OL_W_ID" = w_id)
+			orders = orderLineQuery.filter(OL_O_ID = no_o_id, OL_D_ID = d_id, OL_W_ID = w_id)
 			for record in orders:
 				key, cols = record
 				cols["OL_DELIVERY_ID"] = ol_delivery_id
 				self.conn[sID]["ORDER_LINE"].put(key, ol_delivery_d)
 
 			# updateCustomer
-			customers = customerQuery.filter("C_ID" = c_id, "C_D_ID" = d_id, "C_W_ID" = w_id)
+			customers = customerQuery.filter(C_ID = c_id, C_D_ID = d_id, C_W_ID = w_id)
 			for record in customers:
 				key, cols = record
 				cols["C_BALANCE"] += ol_total
@@ -396,7 +421,7 @@ class TokyocabinetDriver(AbstractDriver):
 			## Determine if this is an all local order or not
 			all_local = all_local and i_w_ids[i] == w_id
 			# getItemInfo
-			itemInfo = itemQuery.filter("I_PRICE" = i_ids[i])
+			itemInfo = itemQuery.filter(I_PRICE = i_ids[i])
 			items.append(itemInfo[0])
 		assert len(items) == len(i_ids)
 
@@ -413,17 +438,17 @@ class TokyocabinetDriver(AbstractDriver):
 		## -----------------
 		
 		# getWarehouseTaxRate
-		taxes = warehouseQuery.filter("W_ID" = w_id)
+		taxes = warehouseQuery.filter(W_ID = w_id)
 		w_tax = taxes.columns("W_TAX")[0]("W_TAX")
 
 		# getDistrict
-		districts = districtQuery.filter("D_ID" = d_id, "D_W_ID" = w_id)
-		districtInfo = districts.columns("D_TAX", "D_NEXT_O_ID")[0]
+		districts = districtQuery.filter(D_ID = d_id, D_W_ID = w_id)
+		districtInfo = districts.columns(D_TAX, D_NEXT_O_ID)[0]
 		d_tax = districtInfo["D_TAX"]
 		d_next_o_id = districtInfo["D_NEXT_O_ID"]
 
 		# getCustomer
-		customers = customerQuery.filter("C_W_ID" = w_id, "C_D_ID" = d_id, "C_ID" = c_id)
+		customers = customerQuery.filter(C_W_ID = w_id, C_D_ID = d_id, C_ID = c_id)
 		customerInfo = customers.columns("C_DISCOUNT", "C_LAST", "C_CREDIT")[0]
 		c_discount = customerInfo["C_DISCOUNT"]
 
@@ -434,7 +459,7 @@ class TokyocabinetDriver(AbstractDriver):
 		o_carrier_id = constants.NULL_CARRIER_ID
 
 		# incrementNextOrderId
-		districts = districtQuery.filter("D_ID" = d_id, "D_W_ID" = w_id)
+		districts = districtQuery.filter(D_ID = d_id, D_W_ID = w_id)
 		for record in districts:
 			key, cols = record
 			cols["D_NEXT_O_ID"] = d_next_o_id + 1
@@ -472,7 +497,7 @@ class TokyocabinetDriver(AbstractDriver):
 			i_data  = itemInfo["I_DATA"]
 
 			# getStockInfo
-			stocks = stockQuery.filter("S_I_ID" = ol_i_id, "S_W_ID" = ol_supply_w_id)
+			stocks = stockQuery.filter(S_I_ID = ol_i_id, S_W_ID = ol_supply_w_id)
 			if len(stocks) == 0:
 				logging.warn("No STOCK record for (ol_i_id=%d, ol_supply_w_id=%d)"
 								% (ol_i_id, ol_supply_w_id))
@@ -498,7 +523,7 @@ class TokyocabinetDriver(AbstractDriver):
 
 			if ol_supply_w_id != w_id: s_remote_cnt += 1
 
-			stocks = stockQuery.filter("S_I_ID" = ol_i_id, "S_W_ID" = ol_supply_w_id)
+			stocks = stockQuery.filter(S_I_ID = ol_i_id, S_W_ID = ol_supply_w_id)
 			for record in stocks:
 				key, cols = record
 				cols["S_QUANTITY"] = s_quantity
@@ -518,11 +543,11 @@ class TokyocabinetDriver(AbstractDriver):
 
 			# createOrderLine
 			key = tupletoString((d_next_o_id, d_id, w_id, ol_number))
-			cols = ("OL_O_ID": d_next_o_id, "OL_D_ID": d_id, "OL_W_ID": w_id,
+			cols = {"OL_O_ID": d_next_o_id, "OL_D_ID": d_id, "OL_W_ID": w_id,
 							"OL_NUMBER": ol_number, "OL_I_ID": ol_i_id,
 							"OL_SUPPLY_W_ID": ol_supply_w_id, "OL_DELIVERY_D":
 							ol_entry_d, "OL_QUANTITY": ol_quantity, "OL_AMOUNT":
-							ol_amount, "OL_DIST_INFO": s_dist_xx)
+							ol_amount, "OL_DIST_INFO": s_dist_xx}
 			self.conn[sID]["ORDER_LINE"].put(key, cols)
 
 			## Add the info to be returned
@@ -573,12 +598,12 @@ class TokyocabinetDriver(AbstractDriver):
 
 		if c_id != None:
 			# getCustomerByCustomerId
-			customers = customerQuery.filter("C_W_ID" = w_id, "C_D_ID" = d_id, "C_ID" = c_id)
+			customers = customerQuery.filter(C_W_ID = w_id, C_D_ID = d_id, C_ID = c_id)
 			customerInfo = customer.columns("C_ID", "C_FIRST", "C_MIDDLE", "C_LAST", "C_BALANCE")[0]
 		else:
 			# Get the midpoint customer's id
 			# getCustomersByLastName
-			customers = customerQuery.filter("C_W_ID" = w_id, "C_D_ID" = d_id, "C_LAST" = c_last).order_by("C_FIRST")
+			customers = customerQuery.filter(C_W_ID = w_id, C_D_ID = d_id, C_LAST = c_last).order_by("C_FIRST")
 			all_customers = customers.columns("C_ID", "C_FIRST", "C_MIDDLE", "C_LAST", "C_BALANCE")
 			namecnt = len(all_customers)
 			assert namecnt > 0
@@ -589,13 +614,13 @@ class TokyocabinetDriver(AbstractDriver):
 		assert c_id != None
 
 		# getLastOrder
-		orders = orderQuery.filter("O_W_ID" = w_id, "O_D_ID" = d_id, "O_C_ID" =	c_id).order_by("-O_ID", numeric=True)
+		orders = orderQuery.filter(O_W_ID = w_id, O_D_ID = d_id, O_C_ID =	c_id).order_by("-O_ID", numeric=True)
 		orderInfo = orders.columns("O_ID", "O_CARRIER_ID", "O_ENTRY_D")[0]
 		o_id = orderInfo["O_ID"]
 
 		# getOrderLines
 		if order:
-			orders = orderLineQuery.filter("OL_W_ID" = w_id, "OL_D_ID" = d_id, "OL_O_ID" = o_id)
+			orders = orderLineQuery.filter(OL_W_ID = w_id, OL_D_ID = d_id, OL_O_ID = o_id)
 			orderLines = orderLines.columns("OL_SUPPLY_W_ID", "OL_I_ID", "OL_QUANTITY", "OL_AMOUNT", "OL_DELIVERY_D")
 		else:
 			orderLines = [ ]
@@ -641,14 +666,14 @@ class TokyocabinetDriver(AbstractDriver):
 
 		if c_id != None:
 			# getCustomerByCustomerId
-			customers = customerQuery.filter("C_W_ID" = w_id, "C_D_ID" = d_id, "C_ID" = c_id)
+			customers = customerQuery.filter(C_W_ID = w_id, C_D_ID = d_id, C_ID = c_id)
 			customerInfo = customer.columns("C_ID", "C_FIRST", "C_MIDDLE",
 							"C_LAST", "C_BALANCE", "C_YTD_PAYMENT",
 							"C_PAYMENT_CNT", "C_DATA" "C_CREDIT")[0]
 		else:
 			# Get the midpoint customer's id
 			# getCustomersByLastName
-			customers = customerQuery.filter("C_W_ID" = w_id, "C_D_ID" = d_id, "C_LAST" = c_last).order_by("C_FIRST")
+			customers = customerQuery.filter(C_W_ID = w_id, C_D_ID = d_id, C_LAST = c_last).order_by("C_FIRST")
 			all_customers = customers.columns("C_ID", "C_FIRST", "C_MIDDLE",
 							"C_LAST", "C_BALANCE", "C_YTD_PAYMENT",
 							"C_PAYMENT_CNT", "C_DATA", "C_CREDIT")
@@ -665,29 +690,29 @@ class TokyocabinetDriver(AbstractDriver):
 		c_data = customerInfo["C_DATA"]
 
 		# getWarehouse
-		warehouses = warehouseQuery.filter("W_ID" = w_id)
+		warehouses = warehouseQuery.filter(W_ID = w_id)
 		warehouseInfo = warehouse.columns("W_NAME","W_STREET_1", "W_STREET_2", "W_CITY", "W_STATE", "W_ZIP")[0]
 
 		# getDistrict
-		districts = districtQuery.filter("D_W_ID" = w_id, "D_ID" = d_id)
+		districts = districtQuery.filter(D_W_ID = w_id, D_ID = d_id)
 		districtInfo = districts.columns("D_NAME", "D_STREET_1", "D_STREET_2", "D_CITY", "D_STATE", "D_ZIP")[0]
 
 		# updateWarehouseBalance
-		warehouses = warehouseQuery.filter("W_ID" = w_id)
+		warehouses = warehouseQuery.filter(W_ID = w_id)
 		for record in warehouses:
 			key, cols = record
 			cols["W_YTD"] += h_amount
 			self.conn[sID]["WAREHOUSE"].put(key, cols)
 
 		# updateDistrictBalance
-		districts = districtQuery.filter("W_ID" = w_id, "D_ID" = d_id)
+		districts = districtQuery.filter(W_ID = w_id, D_ID = d_id)
 		for record in districts:
 			key, cols = record
 			cols["D_YTD"] += h_amount
 			self.conn[sID]["DISTRICT"].put(key, cols)
 
 		# Customer Credit Information
-		customers = customerQuery.filter("C_W_ID" = c_w_id, "C_D_ID" = c_d_id, "C_ID" = c_id)
+		customers = customerQuery.filter(C_W_ID = c_w_id, C_D_ID = c_d_id, C_ID = c_id)
 		
 		if customer["C_CREDIT"] == constants.BAD_CREDIT:
 			newData = " ".join(map(str, [c_id, c_d_id, c_w_id, d_id, w_id, h_amount]))
@@ -719,9 +744,9 @@ class TokyocabinetDriver(AbstractDriver):
 		# Create the history record
 		# insertHistory
 		key = self.conn[sid]["HISTORY"].genuid()
-		cols = ("H_C_ID": c_id, "H_C_D_ID": c_d_id, "H_C_W_ID": c_w_id, "H_D_ID":
+		cols = {"H_C_ID": c_id, "H_C_D_ID": c_d_id, "H_C_W_ID": c_w_id, "H_D_ID":
 						d_id, "H_W_ID": w_id, "H_DATE": h_date, "H_AMOUNT":
-						h_amount, "H_DATA": h_data)
+						h_amount, "H_DATA": h_data}
 		self.conn[sID]["HISTORY"].put(key, cols)
 
 		## Commit!
@@ -760,7 +785,7 @@ class TokyocabinetDriver(AbstractDriver):
 			sys.exit(1)
 
 		# getOId
-		districts = districtQuery.filter("D_W_ID" = w_id, "D_ID" = d_id)
+		districts = districtQuery.filter(D_W_ID = w_id, D_ID = d_id)
 		try:
 			o_id = districts.columns("D_NEXT_O_ID")[0]["D_NEXT_O_ID"]
 		except (KeyError, IndexError), err:
@@ -768,13 +793,12 @@ class TokyocabinetDriver(AbstractDriver):
 			sys.exit(1)
 
 		# getStockCount
-		orders = orderLineQuery.filter("OL_W_ID" = w_id, "OL_D_ID" = d_id,
-						"OL_O_ID" < o_id, "OL_O_ID" >= (o_id-20))
+		orders = orderLineQuery.filter(OL_W_ID = w_id, OL_D_ID = d_id, OL_O_ID__lt = o_id, OL_O_ID__ge = (o_id-20)) 
 		ol_i_ids = orders.columns("OL_I_ID")
 
 		cnt = 0
 		for i_id in set(ol_i_ids):
-			stocks = stockQuery.filter("S_W_ID" = w_id, "S_I_ID" = i_id, "S_QUANTITY" <	threshold)
+			stocks = stockQuery.filter(S_W_ID = w_id, S_I_ID = i_id, S_QUANTITY__lt = threshold)
 			if len(stocks) > 0:
 				cnt += 1
 

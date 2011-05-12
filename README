@@ -1,0 +1,8 @@
+TPC-C driver implementation of Tokyo Cabinet NoSQL database.
+
+- Dependencies (install these before trying the code):
+
+ . Tokyo Cabinet
+ . Tokyo Tyrant
+ . pyrant: https://bitbucket.org/neithere/pyrant/wiki/Home
+

@@ -199,75 +199,20 @@ TABLE_INDEXES = {
 class TokyocabinetDriver(AbstractDriver):
 
 	## In Tokyo Cabinet, we have one connection per *table*, not per database.
+	## Config files have no hierarchy. Let's set up our own hierarchy as a
+	## and evaluate it later.
 	DEFAULT_CONFIG = {
-		"servers": {
-			0: {
-				constants.TABLENAME_ITEM:
-				{
-					"host": "localhost",
-					"port": 1978,
-					"persistent": True,
-					"replicated": False,
-				},
-				constants.TABLENAME_WAREHOUSE:
-				{
-					"host": "localhost",
-					"port": 1979,
-					"persistent": True,
-					"replicated": False,
-				},
-				constants.TABLENAME_DISTRICT:
-				{
-					"host": "localhost",
-					"port": 1980,
-					"persistent": True,
-					"replicated": False,
-				},
-				constants.TABLENAME_CUSTOMER:
-				{
-					"host": "localhost",
-					"port": 1981,
-					"persistent": True,
-					"replicated": False,
-				},
-				constants.TABLENAME_STOCK:
-				{
-					"host": "localhost",
-					"port": 1982,
-					"persistent": True,
-					"replicated": False,
-				},
-				constants.TABLENAME_ORDERS:
-				{
-					"host": "localhost",
-					"port": 1983,
-					"persistent": True,
-					"replicated": False,
-				},
-				constants.TABLENAME_NEW_ORDER:
-				{
-					"host": "localhost",
-					"port": 1984,
-					"persistent": True,
-					"replicated": False,
-				},
-				constants.TABLENAME_ORDER_LINE:
-				{
-					"host": "localhost",
-					"port": 1985,
-					"persistent": True,
-					"replicated": False,
-				},
-				constants.TABLENAME_HISTORY:
-				{
-					"host": "localhost",
-					"port": 1986,
-					"persistent": True,
-					"replicated": False,
-				},
-			},
-		}
-	}
+	"servers": 	("Tokyo Cabinet server configuration", '{ 0: { \
+	constants.TABLENAME_ITEM:	{ "host": "localhost", "port": 19780, "persistent": True, "replicated": False, },\
+	constants.TABLENAME_WAREHOUSE: { "host": "localhost", "port": 19790, "persistent": True,	"replicated": False, },\
+	constants.TABLENAME_DISTRICT: {	"host": "localhost", "port": 19800, "persistent": True, "replicated": False, },\
+	constants.TABLENAME_CUSTOMER: {	"host": "localhost", "port": 19810, "persistent": True, "replicated": False, },\
+	constants.TABLENAME_STOCK: { "host": "localhost", "port": 19820,	"persistent": True,	"replicated": False, },\
+	constants.TABLENAME_ORDERS:	{ "host": "localhost", "port": 19830, "persistent": True, "replicated": False, },\
+	constants.TABLENAME_NEW_ORDER: { "host": "localhost", "port": 19840, "persistent": True,	"replicated": False, },\
+	constants.TABLENAME_ORDER_LINE:	{ "host": "localhost", "port": 19850, "persistent": True, "replicated": False,},\
+	constants.TABLENAME_HISTORY: { "host": "localhost",	"port": 19860, "persistent": True, "replicated": False, },\
+	}, },'), }
 
 	def __init__(self, ddl):
 		super(TokyocabinetDriver, self).__init__("tokyocabinet", ddl)
@@ -302,23 +247,22 @@ class TokyocabinetDriver(AbstractDriver):
 	## loadConfig
 	## ----------------------------------------------
 	def loadConfig(self, config):
-		for key in map(lambda x:x[0], TokyocabinetDriver.DEFAULT_CONFIG):
+		for key in TokyocabinetDriver.DEFAULT_CONFIG.keys():
 			assert key in config, "Missing parameter '%s' in %s configuration" % (key, self.name)
 
 		if config["servers"]:
 			# If reading from INI file, we need to convert Python description in
 			# string to real object
 			if type(config["servers"]) == types.StringType:
-					config["servers"] = eval(config["servers"])
+					config["servers"] = eval(config["servers"])[0]
 			for serverId, tables in config["servers"].iteritems():
 				self.databases[serverId] = tables
 
 		# First connect to databases
 		for serverId, tables in self.databases.iteritems():
-			conn = self.conn.get(serverId, dict())
+			self.conn[serverId] = dict()
 			for tab, values in tables.iteritems():
-				conn[serverId][tab] = pyrant.Tyrant(values["host"], values["port"])
-			self.conn[serverId] = conn
+				self.conn[serverId][tab] = pyrant.Tyrant(values["host"], values["port"])
 		## FOR
 
 		if config["reset"]:

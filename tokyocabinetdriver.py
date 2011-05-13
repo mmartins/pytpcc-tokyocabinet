@@ -27,6 +27,7 @@
 from __future__ import with_statement
 from abstractdriver import *
 from pprint import pprint, pformat
+from pyrant import protocol
 
 import commands
 import constants
@@ -203,15 +204,15 @@ class TokyocabinetDriver(AbstractDriver):
 	## and evaluate it later.
 	DEFAULT_CONFIG = {
 	"servers": 	("Tokyo Cabinet server configuration", '{ 0: { \
-	constants.TABLENAME_ITEM:	{ "host": "localhost", "port": 19780, "persistent": True, "replicated": False, },\
-	constants.TABLENAME_WAREHOUSE: { "host": "localhost", "port": 19790, "persistent": True,	"replicated": False, },\
-	constants.TABLENAME_DISTRICT: {	"host": "localhost", "port": 19800, "persistent": True, "replicated": False, },\
-	constants.TABLENAME_CUSTOMER: {	"host": "localhost", "port": 19810, "persistent": True, "replicated": False, },\
-	constants.TABLENAME_STOCK: { "host": "localhost", "port": 19820,	"persistent": True,	"replicated": False, },\
-	constants.TABLENAME_ORDERS:	{ "host": "localhost", "port": 19830, "persistent": True, "replicated": False, },\
-	constants.TABLENAME_NEW_ORDER: { "host": "localhost", "port": 19840, "persistent": True,	"replicated": False, },\
-	constants.TABLENAME_ORDER_LINE:	{ "host": "localhost", "port": 19850, "persistent": True, "replicated": False,},\
-	constants.TABLENAME_HISTORY: { "host": "localhost",	"port": 19860, "persistent": True, "replicated": False, },\
+	constants.TABLENAME_ITEM:	{ "host": "localhost", "port": 1978, "persistent": True, "replicated": False, },\
+	constants.TABLENAME_WAREHOUSE: { "host": "localhost", "port": 1979, "persistent": True,	"replicated": False, },\
+	constants.TABLENAME_DISTRICT: {	"host": "localhost", "port": 1980, "persistent": True, "replicated": False, },\
+	constants.TABLENAME_CUSTOMER: {	"host": "localhost", "port": 1981, "persistent": True, "replicated": False, },\
+	constants.TABLENAME_STOCK: { "host": "localhost", "port": 1982,	"persistent": True,	"replicated": False, },\
+	constants.TABLENAME_ORDERS:	{ "host": "localhost", "port": 1983, "persistent": True, "replicated": False, },\
+	constants.TABLENAME_NEW_ORDER: { "host": "localhost", "port": 1984, "persistent": True,	"replicated": False, },\
+	constants.TABLENAME_ORDER_LINE:	{ "host": "localhost", "port": 1985, "persistent": True, "replicated": False,},\
+	constants.TABLENAME_HISTORY: { "host": "localhost",	"port": 1986, "persistent": True, "replicated": False, },\
 	}, },'), }
 
 	def __init__(self, ddl):
@@ -219,9 +220,10 @@ class TokyocabinetDriver(AbstractDriver):
 		self.databases = dict()
 		self.conn = dict()
 		self.denormalize = False
+		self.numServers = 1
 
 	##-----------------------------------------------
-	## tupleToString
+	## self.tupleToString
 	##-----------------------------------------------
 	def tupleToString(self, tuple, sep=":"):
 		"""Tokyo-Cabinet table-type databases only accept strings as keys.
@@ -230,12 +232,12 @@ class TokyocabinetDriver(AbstractDriver):
 		return sep.join(str(t) for t in tuple)
 
     ##-----------------------------------------------
-	## getServer
+	## self.getServer
 	##-----------------------------------------------
 	def getServer(self, warehouseID):
 		"""Return server that contains partitioned data, according to warehouseID"""
 		## For now, serverID corresponds to wareHouseID
-		return warehouseID
+		return (warehouseID % self.numServers)
 
 	## ----------------------------------------------
 	## makeDefaultConfig
@@ -274,6 +276,8 @@ class TokyocabinetDriver(AbstractDriver):
 			## FOR
 		## IF
 
+		self.numServers = len(self.databases.keys())
+
 	## -------------------------------------------
 	## loadTuples
 	## -------------------------------------------
@@ -292,7 +296,8 @@ class TokyocabinetDriver(AbstractDriver):
 
 		assert tableName in TABLE_COLUMNS, "Unexpected table %s" % tableName
 		columns = TABLE_COLUMNS[tableName]
-		num_colums = xrange(len(columns))
+		num_columns = xrange(len(columns))
+		records = list()
 
 		## We want to combine all of a CUSTOMER's ORDERS, ORDER_LINE, and
 		## records into a single document
@@ -301,7 +306,7 @@ class TokyocabinetDriver(AbstractDriver):
 			## If this is the CUSTOMER table, then we'll just store the record locally for now
 			if tableName == constants.TABLENAME_CUSTOMER:
 				for t in tuples:
-					c_key = tupleToString(t[:3]) # C_ID, D_ID, W_ID
+					c_key = self.tupleToString(t[:3]) # C_ID, D_ID, W_ID
 					self.w_customers[c_key] = dict(map(lambda i: (columns[i], t[i]), num_columns))
 				## FOR
 
@@ -309,7 +314,7 @@ class TokyocabinetDriver(AbstractDriver):
 			## ORDERS record
 			elif tableName == constants.TABLENAME_ORDER_LINE:
 				for t in tuples:
-					o_key = tupleToString(t[:3]) # O_ID, O_D_ID, O_W_ID
+					o_key = self.tupleToString(t[:3]) # O_ID, O_D_ID, O_W_ID
 					(c_key, o_idx) = self.w_order[o_key]
 					c = self.w_customers[c_key]
 					assert o_idx >= 0
@@ -327,118 +332,142 @@ class TokyocabinetDriver(AbstractDriver):
 		else:
 			if tableName == constants.TABLENAME_WAREHOUSE:
 				for t in tuples:
-					w_key = t[:1] # W_ID
-					sID = getServer(w_key)
+					w_key = t[0] # W_ID
+					sID = self.getServer(w_key)
 					cols = dict(map(lambda i: (columns[i], t[i]), num_columns))
-					try:
-						self.conn[sID][tableName].put(str(w_key), cols)
-					except KeyError, err:
-						sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
-						sys.exit(1)
+					records.append((str(w_key), cols))
 				## FOR
 
-			elif table == constants.TABLENAME_DISTRICT:
+				try:
+					self.conn[sID][tableName].multi_set(records)
+				except KeyError, err:
+					sys.stderr.write("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
+					sys.exit(1)
+
+			elif tableName == constants.TABLENAME_DISTRICT:
 				for t in tuples:
-					w_key = str(t[1:2]) # W_ID
-					d_key = tupleToString(t[:2]) # D_ID, D_W_ID
+					w_key = t[1] # W_ID
+					sID = self.getServer(w_key)
+					d_key = self.tupleToString(t[:2]) # D_ID, D_W_ID
 					cols = dict(map(lambda i: (columns[i], t[i]), num_columns))
-					try:
-						self.conn[w_key][tableName].put(d_key, cols)
-					except KeyError, err:
-						sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
-						sys.exit(1)
+					records.append((d_key, cols))
 				## FOR
+
+				try:
+					self.conn[sID][tableName].multi_set(records)
+				except KeyError, err:
+					sys.stderr.write("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
+					sys.exit(1)
 
 			## Item table doesn't have a w_id for partition. Replicate it to all
 			## servers
-			elif table == constants.TABLENAME_ITEM:
+			elif tableName == constants.TABLENAME_ITEM:
 				for t in tuples:
-					i_key = t[0]
+					i_key = str(t[0])
 					cols = dict(map(lambda i: (columns[i], t[i]), num_columns))
-					for i in xrange(self.numServers):
-						try:
-							self.conn[i][tableName].put(i_key, cols)
-						except KeyError, err:
-							sys.stderr.out("%s(%s): server ID doesn't exist or is offline\n" %(KeyError, err))
-							sys.exit(1)
+					records.append((i_key, cols))
+				## FOR
+
+				for i in xrange(self.numServers):
+					try:
+						self.conn[i][tableName].multi_set(records)
+					except KeyError, err:
+						sys.stderr.write("%s(%s): server ID doesn't exist or is offline\n" %(KeyError, err))
+						sys.exit(1)
 					## FOR
 				## FOR
 
 			elif tableName == constants.TABLENAME_CUSTOMER:
 				for t in tuples:
-					try:
-						w_key = str(t[2:3]) # W_ID
-						c_key = tupleToString(t[:3]) # C_ID, C_D_ID, C_W_ID
-						cols = dict(map(lambda i: (columns[i], t[i]), num_columns))
-						self.conn[w_key][tableName].put(c_key, cols)
-					except KeyError, err:
-						sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
-						sys.exit(1)
+					w_key = t[2] # W_ID
+					sID = self.getServer(w_key)
+					c_key = self.tupleToString(t[:3]) # C_ID, C_D_ID, C_W_ID
+					cols = dict(map(lambda i: (columns[i], t[i]), num_columns))
+					records.append((c_key, cols))
 				## FOR
+
+				try:
+					self.conn[sID][tableName].multi_set(records)
+				except KeyError, err:
+					sys.stderr.write("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
+					sys.exit(1)
 
 			elif tableName == constants.TABLENAME_HISTORY:
 				for t in tuples:
-					w_key = t[4:5] # W_ID
-					sID = getServer(w_key)
-					cols = dict(map(lambda i: (columns[i], t[i], num_columns)))
-					try:
-						self.conn[sID][tableName].put(str(w_key), cols)
-					except KeyError, err:
-						sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
-						sys.exit(1)
+					w_key = t[4] # W_ID
+					# Not really a primary key, but we need to generate
+					# something tobe our key
+					h_key = self.tupleToString(t[:3]) # H_C_ID, H_C_D, H_C_W
+					sID = self.getServer(w_key)
+					cols = dict(map(lambda i: (columns[i], t[i]), num_columns))
+					records.append((h_key, cols))
 				## FOR
+
+				try:
+					self.conn[sID][tableName].multi_set(records)
+				except KeyError, err:
+					sys.stderr.write("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
+					sys.exit(1)
 
 			elif tableName == constants.TABLENAME_STOCK:
 				for t in tuples:
-					w_key = t[1:2] # W_ID
-					sID = getServer(w_key)
-					s_key = tupleToStriong(t[:2]) # S_ID, S_W_ID
+					w_key = t[1] # W_ID
+					sID = self.getServer(w_key)
+					s_key = self.tupleToString(t[:2]) # S_ID, S_W_ID
 					cols = dict(map(lambda i: (columns[i], t[i]), num_columns))
-					try:
-						self.conn[sID][tableName].put(s_key, cols)
-					except KeyError, err:
-						sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
-						sys.exit(1)
+					records.append((s_key, cols))
 				## FOR
+
+				try:
+					self.conn[sID][tableName].multi_set(records)
+				except KeyError, err:
+					sys.stderr.write("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
+					sys.exit(1)
 
 			elif tableName == constants.TABLENAME_ORDERS:
 				for t in tuples:
-					w_key = t[3:4] # W_ID
-					sID = getServer(w_key)
-					o_key = tupleToString(t[1:4]) # O_ID, O_D_ID, O_W_ID
-					cols = dict(map(lambda i: (columns[i], t[i], num_columns)))
-					try:
-						self.conn[sID][tableName].put(o_key, cols)
-					except KeyError, err:
-						sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
-						sys.exit(1)
+					w_key = t[3] # W_ID
+					sID = self.getServer(w_key)
+					o_key = self.tupleToString(t[1:4]) # O_ID, O_D_ID, O_W_ID
+					cols = dict(map(lambda i: (columns[i], t[i]), num_columns))
+					records.append((o_key, cols))
 				## FOR
+
+				try:
+					self.conn[sID][tableName].multi_set(records)
+				except KeyError, err:
+					sys.stderr.write("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
+					sys.exit(1)
 
 			elif tableName == constants.TABLENAME_NEW_ORDER:
 				for t in tuples:
-					w_key = t[2:3] # W_ID
-					sID = getServer(w_key)
-					no_key = tupleToString(t[:3]) # NO_O_ID, NO_D_ID, NO_W_ID
-					cols = dict(map(lambda i: (columns[i], t[i], num_columns)))
-					try:
-						self.conn[sID][tableName].put(no_key, cols)
-					except KeyError, err:
-						sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
-						sys.exit(1)
+					w_key = t[2] # W_ID
+					sID = self.getServer(w_key)
+					no_key = self.tupleToString(t[:3]) # NO_O_ID, NO_D_ID, NO_W_ID
+					cols = dict(map(lambda i: (columns[i], t[i]), num_columns))
+					records.append((no_key, cols))
 				## FOR
+				
+				try:
+					self.conn[sID][tableName].multi_set(records)
+				except KeyError, err:
+					sys.stderr.write("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
+					sys.exit(1)
 
 			elif tableName == constants.TABLENAME_ORDER_LINE:
 				for t in tuples:
-					w_key = t[2:3] # W_ID
-					sID = getServer(w_key)
-					ol_key = tupleToString(t[:4]) # OL_O_ID, OL_D_ID, OL_W_ID, OL_NUMBER
-					cols = dict(map(lambda i: (columns[i], t[i], num_columns)))
-					try:
-						self.conn[sID][tableName].put(ol_key, cols)
-					except KeyError, err:
-						sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
-						sys.exit(1)
+					w_key = t[2] # W_ID
+					sID = self.getServer(w_key)
+					ol_key = self.tupleToString(t[:4]) # OL_O_ID, OL_D_ID, OL_W_ID, OL_NUMBER
+					cols = dict(map(lambda i: (columns[i], t[i]), num_columns))
+					records.append((ol_key, cols))
 				## FOR
+				
+				try:
+					self.conn[sID][tableName].multi_set(records)
+				except KeyError, err:
+					sys.stderr.write("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
+					sys.exit(1)
 
 		logging.debug("Loaded %s tuples for tableName %s" % (len(tuples), tableName))
 		return
@@ -448,12 +477,13 @@ class TokyocabinetDriver(AbstractDriver):
 	## -------------------------------------------
 	def loadFinish(self):
 
+		conn = dict()
 
 		# Add indexes to database after loading all data
 		for serverId, tables in self.databases.iteritems():
-			conn = self.conn.get(serverId, dict())
+			conn[serverId] = dict()
 			for tab, connValues in tables.iteritems():
-				conn[serverId][tab] = pyrant.TyrantProtocol(connValues["host"], connValues["port"])
+				conn[serverId][tab] = protocol.TyrantProtocol(connValues["host"], connValues["port"])
 				for index_name in TABLE_COLUMNS[tab]:
 					conn[serverId][tab].add_index(index_name)
 			## FOR
@@ -490,17 +520,12 @@ class TokyocabinetDriver(AbstractDriver):
 		o_carrier_id = params["o_carrier_id"]
 		ol_delivery_d = params["ol_delivery_id"]
 
-		sID = getServer(w_id)
+		sID = self.getServer(w_id)
 
-		try:
-			newOrderQuery = self.conn[sID][constants.TABLENAME_NEW_ORDER].query
-			ordersQuery   = self.conn[sID][constants.TABLENAME_ORDERS].query
-			orderLineQuery = self.conn[sID][constants.TABLENAME_ORDER_LINE].query
-			customerQuery = self.conn[sID][constants.TABLENAME_CUSTOMER].query
-		except KeyError, err:
-			sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
-			sys.exit(1)
-
+		newOrderQuery = self.conn[sID][constants.TABLENAME_NEW_ORDER].query
+		ordersQuery   = self.conn[sID][constants.TABLENAME_ORDERS].query
+		orderLineQuery = self.conn[sID][constants.TABLENAME_ORDER_LINE].query
+		customerQuery = self.conn[sID][constants.TABLENAME_CUSTOMER].query
 
 		results = [ ]
 		for d_id in xrange(1, constants.DISTRICTS_PER_WAREHOUSE+1):
@@ -540,30 +565,43 @@ class TokyocabinetDriver(AbstractDriver):
 
 			# updateOrders
 			orders = orderQuery.filter(O_ID = no_o_id, O_D_ID = d_id, O_W_ID = w_id)
+
+			records = list()
 			## UPDATE ORDERS SET O_CARRIER_ID = ?...
 			for record in orders:
 				key, cols = record
 				cols["O_CARRIER_ID"] = o_carrier_id
-				self.conn[sID][constants.TABLENAME_ORDERS].put(key, orders)
+				records.append((key, cols))
+			## FOR
+
+			self.conn[sID][constants.TABLENAME_ORDERS].multi_set(records)
 
 			# updateOrderLine
 			orders = orderLineQuery.filter(OL_O_ID = no_o_id, OL_D_ID = d_id, OL_W_ID = w_id)
+			records = list()
 			for record in orders:
 				key, cols = record
 				cols["OL_DELIVERY_ID"] = ol_delivery_id
-				self.conn[sID][constants.TABLENAME_ORDER_LINE].put(key, ol_delivery_d)
+				recods.append((key, cols))
+			## FOR
+
+			self.conn[sID][constants.TABLENAME_ORDER_LINE].multi_set(records)
 
 			# updateCustomer
 			customers = customerQuery.filter(C_ID = c_id, C_D_ID = d_id, C_W_ID = w_id)
+			records = list()
 			for record in customers:
 				key, cols = record
 				cols["C_BALANCE"] += ol_total
-				self.conn[sID][constants.TABLENAME_CUSTOMER].put(key, cols)
+				records.append((key, cols))
+			## FOR
+
+			self.conn[sID][constants.TABLENAME_CUSTOMER].mult_add(records)
 		
-			result.append((d_id, no_o_id))
+			results.append((d_id, no_o_id))
 		## FOR
 
-		return result
+		return results
 
 	def doNewOrder(self, params):
 		"""Execute NEW_ORDER Transaction
@@ -589,19 +627,15 @@ class TokyocabinetDriver(AbstractDriver):
 		assert len(i_ids) == len(i_w_ids)
 		assert len(i_ids) == len(i_qtys)
 
-		sID = getServer(w_id)
+		sID = self.getServer(w_id)
 
-		try:
-			warehouseQuery = self.conn[sID][constants.TABLENAME_WAREHOUSE].query
-			districtQuery  = self.conn[sID][constants.TABLENAME_DISTRICT].query
-			customerQuery  = self.conn[sID][constants.TABLENAME_CUSTOMER].query
-			orderQuery = self.conn[sID][constants.TABLENAME_ORDERS].query
-			newOrderQuery = self.conn[sID][constants.TABLENAME_NEW_ORDER].query
-			itemQuery = self.conn[sID][constants.TABLENAME_ITEM].query
-			stockQuery = self.conn[sID][constants.TABLENAME_STOCK].query
-		except KeyError, err:
-			sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
-			sys.exit(1)
+		warehouseQuery = self.conn[sID][constants.TABLENAME_WAREHOUSE].query
+		districtQuery  = self.conn[sID][constants.TABLENAME_DISTRICT].query
+		customerQuery  = self.conn[sID][constants.TABLENAME_CUSTOMER].query
+		orderQuery = self.conn[sID][constants.TABLENAME_ORDERS].query
+		newOrderQuery = self.conn[sID][constants.TABLENAME_NEW_ORDER].query
+		itemQuery = self.conn[sID][constants.TABLENAME_ITEM].query
+		stockQuery = self.conn[sID][constants.TABLENAME_STOCK].query
 
 		all_local = True
 		items = [ ]
@@ -648,23 +682,27 @@ class TokyocabinetDriver(AbstractDriver):
 
 		# incrementNextOrderId
 		districts = districtQuery.filter(D_ID = d_id, D_W_ID = w_id)
+		records = list()
 		for record in districts:
 			key, cols = record
 			cols["D_NEXT_O_ID"] = d_next_o_id + 1
-			self.conn[sID][constants.TABLENAME_DISTRICT].put(key, cols)
+			records.append((key, cols))
+		## FOR
+
+		self.conn[sID][constants.TABLENAME_DISTRICT].multi_set(records)
 
 		# createOrder
-		key = tupleToString((d_next_o_id, d_id, w_id))
+		key = self.tupleToString((d_next_o_id, d_id, w_id))
 		cols = {"O_ID": d_next_o_id, "O_D_ID": d_id, "O_W_ID": w_id, "O_C_ID":
 						c_id, "O_ENTRY_D": o_entry_d, "O_CARRIER_ID":
 						o_carrier_id, "O_OL_CNT": o_ol_cnt, "O_ALL_LOCAL":
 						all_local}
-		self.conn[sID][constants.TABLENAME_ORDERS].put(key, cols)
+		self.conn[sID][constants.TABLENAME_ORDERS].multi_set([(key, cols)])
 
 		# createNewOrder
-		key = tupleToString((d_next_o_id, d_id, w_id))
+		key = self.tupleToString((d_next_o_id, d_id, w_id))
 		cols = {"NO_O_ID": d_next_o_id, "NO_D_ID": d_id, "NO_W_ID": w_id}
-		self.conn[sID][constants.TABLENAME_NEW_ORDER].put(key, cols)
+		self.conn[sID][constants.TABLENAME_NEW_ORDER].multi_set([(key, cols)])
 
 		## -------------------------------
 		## Insert Order Item Information
@@ -712,13 +750,17 @@ class TokyocabinetDriver(AbstractDriver):
 			if ol_supply_w_id != w_id: s_remote_cnt += 1
 
 			stocks = stockQuery.filter(S_I_ID = ol_i_id, S_W_ID = ol_supply_w_id)
+			records = list()
 			for record in stocks:
 				key, cols = record
 				cols["S_QUANTITY"] = s_quantity
 				cols["S_YTD"] = s_ytd
 				cols["S_ORDER_CNT"] =  s_order_cnt
 				cols["S_REMOTE_CNT"] = s_remote_cnt
-				self.conn[sID][constants.TABLENAME_STOCK].put(key, cols)
+				records.append((key, cols))
+			## FOR
+
+			self.conn[sID][constants.TABLENAME_STOCK].multi_set(records)
 
 			if i_data.find(constants.ORIGINAL_STRING) != -1 and s_data.find(constants.ORIGINAL_STRING) != -1:
 				bran_generic = 'B'
@@ -736,7 +778,7 @@ class TokyocabinetDriver(AbstractDriver):
 							"OL_SUPPLY_W_ID": ol_supply_w_id, "OL_DELIVERY_D":
 							ol_entry_d, "OL_QUANTITY": ol_quantity, "OL_AMOUNT":
 							ol_amount, "OL_DIST_INFO": s_dist_xx}
-			self.conn[sID][constants.TABLENAME_ORDER_LINE].put(key, cols)
+			self.conn[sID][constants.TABLENAME_ORDER_LINE].multi_set([(key, cols)])
 
 			## Add the info to be returned
 			item_data.append((i_name, s_quantity, brand_generic, i_price, ol_amount))
@@ -774,15 +816,11 @@ class TokyocabinetDriver(AbstractDriver):
 		assert w_id, pformat(params)
 		assert d_id, pformat(params)
 
-		sID = getServer(w_id)
+		sID = self.getServer(w_id)
 
-		try:
-			customerQuery = self.conn[constants.TABLENAME_CUSTOMER]
-			orderQuery    = self.conn[constants.TABLENAME_ORDERS]
-			orderLineQuery= self.conn[constants.TABLENAME_ORDER_LINE]
-		except KeyError, err:
-			sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
-			sys.exit(1)
+		customerQuery = self.conn[constants.TABLENAME_CUSTOMER]
+		orderQuery    = self.conn[constants.TABLENAME_ORDERS]
+		orderLineQuery= self.conn[constants.TABLENAME_ORDER_LINE]
 
 		if c_id != None:
 			# getCustomerByCustomerId
@@ -842,15 +880,11 @@ class TokyocabinetDriver(AbstractDriver):
 		c_last = params["c_last"]
 		h_date = params["h_date"]
 
-		sID = getServer(w_id)
+		sID = self.getServer(w_id)
 
-		try:
-			customerQuery  = self.conn[constants.TABLENAME_CUSTOMER]
-			wareHouseQuery = self.conn[constants.TABLENAME_WAREHOUSE]
-			districtQuery  = self.conn[constants.TABLENAME_DISTRICT]
-		except KeyError, err:
-			sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
-			sys.exit(1)
+		customerQuery  = self.conn[constants.TABLENAME_CUSTOMER]
+		wareHouseQuery = self.conn[constants.TABLENAME_WAREHOUSE]
+		districtQuery  = self.conn[constants.TABLENAME_DISTRICT]
 
 		if c_id != None:
 			# getCustomerByCustomerId
@@ -887,17 +921,23 @@ class TokyocabinetDriver(AbstractDriver):
 
 		# updateWarehouseBalance
 		warehouses = warehouseQuery.filter(W_ID = w_id)
+		records = list()
 		for record in warehouses:
 			key, cols = record
 			cols["W_YTD"] += h_amount
-			self.conn[sID][constants.TABLENAME_WAREHOUSE].put(key, cols)
+			records.append((key, cols))
+		## FOR
+		self.conn[sID][constants.TABLENAME_WAREHOUSE].multi_set(records)
 
 		# updateDistrictBalance
 		districts = districtQuery.filter(W_ID = w_id, D_ID = d_id)
+		records = list()
 		for record in districts:
 			key, cols = record
 			cols["D_YTD"] += h_amount
-			self.conn[sID][constants.TABLENAME_DISTRICT].put(key, cols)
+			records.append((key, cols))
+		## FOR
+		self.conn[sID][constants.TABLENAME_DISTRICT].multi_set(records)
 
 		# Customer Credit Information
 		customers = customerQuery.filter(C_W_ID = c_w_id, C_D_ID = c_d_id, C_ID = c_id)
@@ -908,39 +948,46 @@ class TokyocabinetDriver(AbstractDriver):
 			if len(c_data) > constants.MAX_C_DATA: c_data =	c_data[:constants.MAX_C_DATA]
 
 			# updateBCCustomer
+			records = list()
 			for record in customers:
 				key, cols = record
 				cols["C_BALANCE"] = c_balance
 				cols["C_YTD_PAYMENT"] = c_ytd_payment
 				cols["C_PAYMENT_CNT"] = c_payment_cnt
 				cols["C_DATA"] = c_data
-				self.conn[sID][constants.TABLENAME_CUSTOMER].put(key, cols)
+				records.append((key, cols))
+			## FOR
+			self.conn[sID][constants.TABLENAME_CUSTOMER].multi_set(records)
 		else:
 			c_data = ""
 
+			records = list()
 			# updateGCCustomer
 			for record in customers:
 				key, cols = record
 				cols["C_BALANCE"] = c_balance
 				cols["C_YTD_PAYMENT"] = c_ytd_payment
 				cols["C_PAYMENT_CNT"] = c_payment_cnt
-				self.conn[sID][constants.TABLENAME_CUSTOMER].put(key, cols)
+				records.append((key, cols))
+			## FOR
+			self.conn[sID][constants.TABLENAME_CUSTOMER].multi_set(records)
 
 		# Concatenate w_name, four space, d_name
 		h_data = "%s    %s" % (warehouseInfo["W_NAME"], districtInfo["D_NAME"])
 
 		# Create the history record
 		# insertHistory
-		try:
-			key = self.conn[sid][constants.TABLENAME_HISTORY].generate_key()
-		except ValueError, err:
-			sys.stderr.write("%s(%s): Can't generate unique primary key\n" % (ValueError, err))
-			return
+		#try:
+		#	key = self.conn[sid][constants.TABLENAME_HISTORY].generate_key()
+		#except ValueError, err:
+		#	sys.stderr.write("%s(%s): Can't generate unique primary key\n" % (ValueError, err))
+		#	return
+		h_key = self.tupleToString((c_id, c_d_id, c_w_id))
 
 		cols = {"H_C_ID": c_id, "H_C_D_ID": c_d_id, "H_C_W_ID": c_w_id, "H_D_ID":
 						d_id, "H_W_ID": w_id, "H_DATE": h_date, "H_AMOUNT":
 						h_amount, "H_DATA": h_data}
-		self.conn[sID][constants.TABLENAME_HISTORY].put(key, cols)
+		self.conn[sID][constants.TABLENAME_HISTORY].multi_set([(key, cols)])
 
 		## Commit!
 		# TODO Commit
@@ -969,13 +1016,9 @@ class TokyocabinetDriver(AbstractDriver):
 		d_id = params["d_id"]
 		threshold = params["threshold"]
 
-		try:
-			districtQuery  = self.conn[constants.TABLENAME_DISTRICT].query
-			orderLineQuery = self.conn[constants.TABLENAME_ORDER_LINE].query
-			stockQuery     = self.conn[constants.TABLENAME_STOCK].query
-		except KeyError, err:
-			sys.stderr.out("%s(%s): server ID does not exist or is offline\n" %(KeyError, err))
-			sys.exit(1)
+		districtQuery  = self.conn[constants.TABLENAME_DISTRICT].query
+		orderLineQuery = self.conn[constants.TABLENAME_ORDER_LINE].query
+		stockQuery     = self.conn[constants.TABLENAME_STOCK].query
 
 		# getOId
 		districts = districtQuery.filter(D_W_ID = w_id, D_ID = d_id)
